@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3D Audio Cube with Three.js</title>
+    <style>
+        #controls {
+            position: absolute;
+            top: 0;
+            left: 0;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .slider-container {
+            margin-bottom: 10px;
+        }
+        
+        .slider-container label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .slider-container input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+        }
+        
+        #startButton {
+            display: block;
+            width: 100%;
+            padding: 8px;
+            margin-top: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        
+        #startButton:hover {
+            background-color: #45a049;
+        }
+    </style>
+
+</head>
+<body>
+    <div id="controls">
+        <div class="slider-container">
+            <label for="sliderX">X Position</label>
+            <input type="range" id="sliderX" min="0" max="100" value="50">
+        </div>
+        <div class="slider-container">
+            <label for="sliderY">Y Position</label>
+            <input type="range" id="sliderY" min="0" max="100" value="50">
+        </div>
+        <div class="slider-container">
+            <label for="sliderZ">Z Position</label>
+            <input type="range" id="sliderZ" min="0" max="100" value="50">
+        </div>
+        <button id="startButton">Start Audio</button>
+        <button id="demoButton">Demo</button>
+        
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/three@0.125.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.125.2/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        let scene, camera, renderer, listenerDot, speakerDot;
+        let audioContext, pannerNode, audioSource;
+        let sliderX, sliderY, sliderZ;
+        let controls;
+        let demoInProgress = false;
+        let demoAngle = 0;
+
+        function initThreeJS() {
+            scene = new THREE.Scene();
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
+
+            renderer = new THREE.WebGLRenderer();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // Increase the size of the cube
+            const geometry = new THREE.BoxGeometry(2, 2, 2); // Bigger cube
+            const material = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+            const cube = new THREE.Mesh(geometry, material);
+            scene.add(cube);
+
+            const labels = ["Left", "Right", "Up", "Down", "Front", "Back"];
+            const positions = [
+                new THREE.Vector3(-1.5, 0, 0), // Left
+                new THREE.Vector3(1.5, 0, 0),  // Right
+                new THREE.Vector3(0, 1.5, 0),  // Up
+                new THREE.Vector3(0, -1.5, 0), // Down
+                new THREE.Vector3(0, 0, 1.5),  // Front
+                new THREE.Vector3(0, 0, -1.5)  // Back
+            ];
+            
+            labels.forEach((label, index) => {
+                const sprite = createTextSprite(label);
+                sprite.position.copy(positions[index]);
+                scene.add(sprite);
+            });
+
+            const dotGeometry = new THREE.SphereGeometry(0.1, 32, 32);
+            const listenerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const speakerMaterial = new THREE.MeshBasicMaterial({ color: 0x0000ff });
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            
+            listenerDot = new THREE.Mesh(dotGeometry, listenerMaterial);
+            speakerDot = new THREE.Mesh(dotGeometry, speakerMaterial);
+
+            listenerDot.position.set(0, 0, 0);
+            scene.add(listenerDot);
+            scene.add(speakerDot);
+
+            animate();
+        }
+
+        function createTextSprite(text) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            context.font = "50px Arial";
+            context.fillStyle = "rgba(255, 255, 255, 1)";
+            context.fillText(text, 0, 50);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            
+            return sprite;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // only required if controls.enableDamping = true, or if controls.autoRotate = true
+            renderer.render(scene, camera);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            sliderX = document.getElementById('sliderX');
+            sliderY = document.getElementById('sliderY');
+            sliderZ = document.getElementById('sliderZ');
+
+            const startButton = document.getElementById('startButton');
+            startButton.addEventListener('click', () => {
+                setupAudioContext();
+                startButton.style.display = 'none';
+            });
+
+            [sliderX, sliderY, sliderZ].forEach(slider => {
+                slider.addEventListener('input', updateSpeakerPosition);
+            });
+
+            initThreeJS();
+            
+            const demoButton = document.getElementById('demoButton');
+            demoButton.addEventListener('click', startDemo);
+        });
+
+        function setupAudioContext() {
+            audioContext = new AudioContext();
+
+            pannerNode = audioContext.createPanner();
+            pannerNode.panningModel = 'HRTF';
+            pannerNode.distanceModel = 'inverse';
+            pannerNode.refDistance = 1;
+            pannerNode.maxDistance = 50000;
+            pannerNode.rolloffFactor = 1;
+
+            const audioElement = new Audio('sound.mp3');
+            audioElement.loop = true;
+            audioSource = audioContext.createMediaElementSource(audioElement);
+            audioSource.connect(pannerNode).connect(audioContext.destination);
+
+            audioElement.play().catch(e => console.error('Error playing audio:', e));
+        }
+
+        function updateSpeakerPosition() {
+            const x = (sliderX.value / 25) - 2; // Maps 0-100 range to -2 to 2
+            const y = (sliderY.value / 25) - 2; // Maps 0-100 range to -2 to 2
+            const z = (sliderZ.value / 25) - 2; // Maps 0-100 range to -2 to 2
+            
+            speakerDot.position.set(x, y, z);
+            
+            if (audioContext) {
+                pannerNode.positionX.setValueAtTime(x, audioContext.currentTime);
+                pannerNode.positionY.setValueAtTime(y, audioContext.currentTime);
+                pannerNode.positionZ.setValueAtTime(z, audioContext.currentTime);
+            }
+        }  
+        
+        function startDemo() {
+            if (!demoInProgress) {
+                demoInProgress = true;
+                demoAngle = 0;
+                animateSpeaker();
+            }
+        }
+        
+        function animateSpeaker() {
+            if (!demoInProgress) return;
+            
+            // Update the angle for circular motion
+            demoAngle += 0.01; // Speed of the circular motion
+            const radius = 1; // Radius of the circle
+            
+            // Calculate x and z positions for circular motion
+            const x = radius * Math.cos(demoAngle);
+            const z = radius * Math.sin(demoAngle);
+            
+            // Update speaker position
+            speakerDot.position.set(x, 0, z);
+            if (audioContext) {
+                pannerNode.positionX.setValueAtTime(x, audioContext.currentTime);
+                pannerNode.positionY.setValueAtTime(0, audioContext.currentTime);
+                pannerNode.positionZ.setValueAtTime(z, audioContext.currentTime);
+            }
+            
+            // Update slider positions
+            sliderX.value = (x + 1) * 50;
+            sliderZ.value = (z + 1) * 50;
+            
+            // Continue the animation
+            requestAnimationFrame(animateSpeaker);
+            
+            // Stop the demo after one full circle
+            if (demoAngle >= 2 * Math.PI) {
+                demoInProgress = false;
+            }
+        }
+    </script>
+</body>
+</html>
